@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>뉴턴의 사과 피하기 게임</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      height: 100%;
+      background: black;
+    }
+    canvas {
+      display: none;
+      touch-action: none;
+    }
+    #startScreen, #endScreen {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.6);
+      color: white;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 10;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 20px;
+      cursor: pointer;
+    }
+    #scoreBoard {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: white;
+      font-size: 20px;
+      z-index: 5;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="startScreen">
+    <h1>뉴턴의 사과 피하기 게임</h1>
+    <button onclick="startGame()">클릭해서 시작</button>
+  </div>
+
+  <div id="scoreBoard">점수: 0 | 최고점수: 0</div>
+  <canvas id="gameCanvas"></canvas>
+
+  <div id="endScreen" style="display: none;">
+    <h1>💥 뉴턴이 만유인력을 발견했다! 💡</h1>
+    <p id="finalScore">점수: 0 | 최고점수: 0</p>
+    <button onclick="resetGame()">다시 클릭해서 시작</button>
+  </div>
+
+  <audio id="bgMusic" loop>
+    <source src="음악경로/background.mp3" type="audio/mpeg">
+    브라우저가 오디오를 지원하지 않습니다.
+  </audio>
+
+  <script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+    const startScreen = document.getElementById("startScreen");
+    const endScreen = document.getElementById("endScreen");
+    const scoreBoard = document.getElementById("scoreBoard");
+    const finalScore = document.getElementById("finalScore");
+    const bgMusic = document.getElementById("bgMusic");
+
+    // 🔧 설정 값들
+    const NEWTON_WIDTH = 110;
+    let NEWTON_HEIGHT = 200;
+    const APPLE_SIZE = 90;
+    const NEWTON_SPEED = 800;
+    const APPLE_INITIAL_SPEED = 10;
+    const APPLE_SPAWN_INTERVAL = 400;
+    const APPLE_SPAWN_DECREASE = 7;    // 점수 10점마다 사과 생성 간격(ms) 얼마나 줄일지
+    const MIN_APPLE_SPAWN_INTERVAL = 100;  // 사과 생성 간격 최소값(ms)
+
+    // 사과 한 번에 생성 개수 (여기서 조절)
+    const APPLES_PER_SPAWN = 2;   // ← 이 값만 바꾸면 됨!
+
+    const appleTreeImg = new Image();
+    appleTreeImg.src = "apple_tree.jpg";
+
+    const newtonImg = new Image();
+    newtonImg.src = "newton.png";
+
+    const appleImg = new Image();
+    appleImg.src = "apple.png";
+
+    let newton = {
+      x: 0,
+      y: 0,
+      size: { width: NEWTON_WIDTH, height: NEWTON_HEIGHT },
+      speed: NEWTON_SPEED
+    };
+    let apples = [];
+    let score = 0;
+    let highScore = localStorage.getItem("highScore") ? parseInt(localStorage.getItem("highScore")) : 0;
+    let appleSpeed = APPLE_INITIAL_SPEED;
+    let gameInterval, appleInterval;
+
+    let mousePos = null;
+    let touchPos = null;
+
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+
+    window.addEventListener("resize", resizeCanvas);
+    resizeCanvas();
+
+    newtonImg.onload = () => {
+      const ratio = newtonImg.height / newtonImg.width;
+      NEWTON_HEIGHT = NEWTON_WIDTH * ratio;
+      newton.size.height = NEWTON_HEIGHT;
+      newton.x = canvas.width / 2 - NEWTON_WIDTH / 2;
+      newton.y = canvas.height - NEWTON_HEIGHT - 10;
+    };
+
+    function startGame() {
+      startScreen.style.display = "none";
+      canvas.style.display = "block";
+      endScreen.style.display = "none";
+      score = 0;
+      appleSpeed = APPLE_INITIAL_SPEED;
+      apples = [];
+      newton.x = canvas.width / 2 - NEWTON_WIDTH / 2;
+      newton.y = canvas.height - NEWTON_HEIGHT - 10;
+
+      scoreBoard.textContent = `점수: ${score} | 최고점수: ${highScore}`;
+
+      canvas.addEventListener("mousemove", e => {
+        const rect = canvas.getBoundingClientRect();
+        mousePos = {
+          x: e.clientX - rect.left - newton.size.width / 2
+        };
+      });
+
+      canvas.addEventListener("touchmove", e => {
+        e.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        const touch = e.touches[0];
+        touchPos = {
+          x: touch.clientX - rect.left - newton.size.width / 2
+        };
+      }, { passive: false });
+
+      gameInterval = setInterval(gameLoop, 1000 / 60);
+      appleInterval = setInterval(spawnApple, APPLE_SPAWN_INTERVAL);
+      bgMusic.currentTime = 0;
+      bgMusic.play();
+    }
+
+    function resetGame() {
+      clearInterval(gameInterval);
+      clearInterval(appleInterval);
+      endScreen.style.display = "none";
+      startScreen.style.display = "flex";
+      canvas.style.display = "none";
+      bgMusic.pause();
+      mousePos = null;
+      touchPos = null;
+    }
+
+    function moveNewton() {
+      const targetX = touchPos?.x ?? mousePos?.x;
+      if (targetX == null) return;
+
+      const dx = targetX - newton.x;
+      if (Math.abs(dx) > newton.speed) {
+        newton.x += (dx > 0 ? 1 : -1) * newton.speed;
+      } else {
+        newton.x = targetX;
+      }
+
+      newton.x = Math.max(0, Math.min(canvas.width - newton.size.width, newton.x));
+    }
+
+    // 한 번에 APPLES_PER_SPAWN 개수만큼 사과 생성
+    function spawnApple() {
+      for (let i = 0; i < APPLES_PER_SPAWN; i++) {
+        apples.push({
+          x: Math.random() * (canvas.width - APPLE_SIZE),
+          y: 0,
+          size: APPLE_SIZE,
+          speed: appleSpeed
+        });
+      }
+    }
+
+    function checkCollision(apple) {
+      return (
+        apple.x < newton.x + newton.size.width &&
+        apple.x + apple.size > newton.x &&
+        apple.y < newton.y + newton.size.height &&
+        apple.y + apple.size > newton.y
+      );
+    }
+
+    function increaseDifficulty() {
+      score++;
+      if (score % 10 === 0) {
+        appleSpeed += 0.5;
+
+        // 사과 생성 간격을 줄임 (최소값 제한)
+        let newInterval = APPLE_SPAWN_INTERVAL - (score / 10) * APPLE_SPAWN_DECREASE;
+        newInterval = Math.max(newInterval, MIN_APPLE_SPAWN_INTERVAL);
+
+        clearInterval(appleInterval);
+        appleInterval = setInterval(spawnApple, newInterval);
+      }
+  scoreBoard.textContent = `점수: ${score} | 최고점수: ${highScore}`;
+}
+
+    function gameLoop() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(appleTreeImg, 0, 0, canvas.width, canvas.height);
+
+      moveNewton();
+      ctx.drawImage(
+        newtonImg,
+        newton.x,
+        newton.y,
+        newton.size.width,
+        newton.size.height
+      );
+
+      for (let i = apples.length - 1; i >= 0; i--) {
+        const apple = apples[i];
+        apple.y += apple.speed;
+        ctx.drawImage(appleImg, apple.x, apple.y, apple.size, apple.size);
+
+        if (checkCollision(apple)) {
+          clearInterval(gameInterval);
+          clearInterval(appleInterval);
+          canvas.style.display = "none";
+          endScreen.style.display = "flex";
+          bgMusic.pause();
+
+          if (score > highScore) {
+            highScore = score;
+            localStorage.setItem("highScore", highScore);
+          }
+
+          finalScore.textContent = `점수: ${score} | 최고점수: ${highScore}`;
+          return;
+        } else if (apple.y > canvas.height) {
+          apples.splice(i, 1);
+          increaseDifficulty();
+        }
+      }
+    }
+  </script>
+</body>
+</html>
